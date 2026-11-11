@@ -217,6 +217,50 @@ def api_finish(request: Request, upload_id: str, total: int, name: str, sha256: 
     directory.rmdir()
     return result
 
+
+def shared_signature(name: str, expires: int, digest: str) -> str:
+    payload = f"share-read-v1\\n{name}\\n{expires}\\n{digest}"
+    return hmac.new(SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+@app.post("/ui/share")
+async def ui_share(request: Request):
+    admin_only(request)
+    body = await request.json()
+    name = valid_name(str(body.get("name", "")))
+    p = target(name)
+    if not p.is_file():
+        raise HTTPException(404, "Not found")
+    expires = int(time.time()) + 600
+    digest = hashlib.sha256(p.read_bytes()).hexdigest()
+    sig = shared_signature(name, expires, digest)
+    from urllib.parse import urlencode
+    path = "/shared?" + urlencode({"name": name, "expires": expires, "signature": sig})
+    return {"path": path, "expires": expires}
+
+@app.get("/shared")
+def shared_read(name: str, expires: int, signature: str):
+    name = valid_name(name)
+    if expires < int(time.time()) or expires > int(time.time()) + 600:
+        raise HTTPException(403, "Link expired or invalid")
+    p = target(name)
+    if not p.is_file():
+        raise HTTPException(404, "Not found")
+    digest = hashlib.sha256(p.read_bytes()).hexdigest()
+    expected = shared_signature(name, expires, digest)
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(403, "Invalid share signature")
+    from fastapi.responses import PlainTextResponse, Response
+    data = p.read_bytes()
+    try:
+        content = data.decode("utf-8")
+        response = PlainTextResponse(content)
+    except UnicodeDecodeError:
+        response = Response(data, media_type="application/octet-stream")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
