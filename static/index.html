@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Atlas File Gateway</title><style>
+:root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color-scheme:dark;background:#0e1117;color:#e8edf5}
+*{box-sizing:border-box}body{margin:0 auto;padding:28px 20px;max-width:1100px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}h1{font-size:24px;margin:0}h2{font-size:17px;margin:0 0 14px}
+small,.muted{color:#99a5b5}.panel{background:#171d27;border:1px solid #293243;border-radius:12px;padding:20px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:760px){.grid{grid-template-columns:1fr}}
+input,textarea,button{font:inherit}input,textarea{width:100%;padding:11px;border:1px solid #364256;background:#101722;border-radius:8px;color:#f5f8fc;margin:7px 0 13px}
+textarea{min-height:225px;resize:vertical;line-height:1.5}
+button{border:0;background:#4b91f6;color:#071321;padding:10px 15px;border-radius:8px;cursor:pointer;font-weight:650}
+button.secondary{background:#293445;color:#e8edf5}button.danger{background:#482629;color:#ffb8b8}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.file{display:flex;gap:15px;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #293243}
+.file:last-child{border:0}.filename{overflow-wrap:anywhere;font-weight:600}.size{font-size:12px;color:#9aa6b8}
+#status{min-height:20px;color:#8fd8ae}.hidden{display:none!important}label{font-size:13px;color:#b9c4d2}a{color:#90baff}
+</style></head><body>
+<header><div><h1>Atlas File Gateway</h1><small>Личный обмен файлами с AI-агентами</small></div><button id="logout" class="secondary hidden">Выйти</button></header>
+<section id="loginBox" class="panel"><h2>Вход</h2><form id="loginForm"><label>Пароль администратора</label><input id="password" type="password" autocomplete="current-password" required><button>Войти</button></form></section>
+<main id="main" class="hidden">
+<div class="grid"><section class="panel"><h2>Создать текстовый файл</h2>
+<form id="textForm"><label>Название файла</label><input id="textName" value="note.txt" required maxlength="160">
+<label>Вставь текст</label><textarea id="textContent" placeholder="Вставьте текст сюда…"></textarea>
+<div class="actions"><button>Сохранить как .txt</button><small>UTF-8, сохраняется на сервере</small></div></form></section>
+<section class="panel"><h2>Загрузить файл</h2><form id="uploadForm"><label>Выбери файл с компьютера</label>
+<input type="file" id="fileInput" required><button>Загрузить</button></form>
+<p class="muted">Поддерживаются любые типы файлов. Максимальный размер по умолчанию — 10 МБ.</p>
+<h2>API для агентов</h2><p class="muted">GET /api/list, /api/read, /api/write, /api/chunk и /api/finish. Для скриптов используй заголовок X-API-Key. Токен задаётся отдельно от пароля Web UI.</p></section></div>
+<section class="panel"><div class="actions" style="justify-content:space-between"><h2>Файлы на сервере</h2><button class="secondary" id="refresh">Обновить</button></div><div id="files"></div></section></main>
+<div id="status" role="status"></div>
+<script>
+const $=id=>document.getElementById(id);
+function message(t,bad=false){$('status').textContent=t;$('status').style.color=bad?'#ff9e9e':'#8fd8ae'}
+async function req(path,opts={}){const headers={'X-Atlas-UI':'1',...(opts.headers||{})};const r=await fetch(path,{...opts,headers,cache:'no-store',credentials:'same-origin'});if(!r.ok){let err=await r.text();try{err=JSON.parse(err).detail||err}catch{};throw Error(err)}return r}
+async function refresh(){try{const r=await req('/ui/files');const files=await r.json();$('loginBox').classList.add('hidden');$('main').classList.remove('hidden');$('logout').classList.remove('hidden');const list=$('files');list.replaceChildren();if(!files.length){list.textContent='Пока нет файлов';return}
+for(const f of files){const row=document.createElement('div');row.className='file';const left=document.createElement('div');const name=document.createElement('div');name.className='filename';name.textContent=f.name;const meta=document.createElement('div');meta.className='size';meta.textContent=(f.size/1024).toFixed(1)+' КБ · '+new Date(f.modified*1000).toLocaleString('ru-RU');left.append(name,meta);const buttons=document.createElement('div');buttons.className='actions';
+const download=document.createElement('button');download.className='secondary';download.textContent='Скачать';download.onclick=async()=>{try{const response=await req('/ui/read?name='+encodeURIComponent(f.name));const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){message(e.message,true)}};
+const del=document.createElement('button');del.className='danger';del.textContent='Удалить';del.onclick=async()=>{if(!confirm('Удалить '+f.name+'?'))return;try{await req('/ui/files?name='+encodeURIComponent(f.name),{method:'DELETE'});await refresh()}catch(e){message(e.message,true)}};buttons.append(download,del);row.append(left,buttons);list.append(row)}
+}catch(e){$('loginBox').classList.remove('hidden');$('main').classList.add('hidden');$('logout').classList.add('hidden')}}
+$('loginForm').onsubmit=async e=>{e.preventDefault();try{await req('/login',{method:'POST',body:new URLSearchParams({password:$('password').value})});$('password').value='';await refresh();message('Вход выполнен')}catch(e){message('Ошибка входа: '+e.message,true)}};
+$('textForm').onsubmit=async e=>{e.preventDefault();try{await req('/ui/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('textName').value,text:$('textContent').value})});message('Текстовый файл сохранён');await refresh()}catch(e){message(e.message,true)}};
+$('uploadForm').onsubmit=async e=>{e.preventDefault();const f=$('fileInput').files[0];if(!f)return;const body=new FormData();body.append('file',f);try{await req('/ui/upload',{method:'POST',body});message('Файл загружен');$('fileInput').value='';await refresh()}catch(e){message(e.message,true)}};
+$('refresh').onclick=refresh;$('logout').onclick=async()=>{try{await req('/logout',{method:'POST'});location.reload()}catch(e){message(e.message,true)}};refresh();
+</script></body></html>
