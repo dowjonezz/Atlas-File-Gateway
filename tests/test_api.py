@@ -13,7 +13,7 @@ def test_file_flow(monkeypatch):
         monkeypatch.setenv("SESSION_SECRET", "c" * 40)
         import app as module
         importlib.reload(module)
-        client = TestClient(module.app)
+        client = TestClient(module.app, base_url="https://testserver")
         h = {"X-API-Key": "b" * 40}
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/api/list").status_code == 401
