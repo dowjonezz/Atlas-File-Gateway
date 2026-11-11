@@ -29,5 +29,13 @@ def test_file_flow(monkeypatch):
         assert client.get("/ui/files", cookies=cookies).status_code == 200
         res = client.post("/ui/text", json={"name": "pasted.txt", "text": "Тест"}, headers={"X-Atlas-UI": "1"}, cookies=cookies)
         assert res.status_code == 200, res.text
+        share = client.post("/ui/share", json={"name": "pasted.txt"}, headers={"X-Atlas-UI": "1"}, cookies=cookies)
+        assert share.status_code == 200, share.text
+        share_path = share.json()["path"]
+        assert client.get(share_path).text == "Тест"
+        assert client.get(share_path.replace("signature=", "signature=bad")).status_code == 403
+        assert client.post("/ui/share", json={"name": "pasted.txt"}).status_code == 401
+        client.post("/ui/text", json={"name": "pasted.txt", "text": "Changed"}, headers={"X-Atlas-UI": "1"}, cookies=cookies)
+        assert client.get(share_path).status_code == 403
         res = client.delete("/ui/files", params={"name": "pasted.txt"}, headers={"X-Atlas-UI": "1"}, cookies=cookies)
         assert res.status_code == 200
